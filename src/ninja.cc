@@ -94,6 +94,12 @@ struct NinjaMain : public BuildLogUser {
   /// Build configuration set from flags (e.g. parallelism).
   const BuildConfig& config_;
 
+  /// Client of jobserver to manage job slots assigned to ninja.
+// TODO: jobserver client support for Windows
+#ifndef _WIN32
+  Jobserver jobserver_;
+#endif
+
   /// Loaded state (rules, nodes).
   State state_;
 
@@ -267,7 +273,13 @@ bool NinjaMain::RebuildManifest(const char* input_file, string* err,
   if (!node)
     return false;
 
-  Builder builder(&state_, config_, &build_log_, &deps_log_, &disk_interface_,
+// TODO: jobserver client support for Windows
+#ifndef _WIN32
+  Builder builder(&state_, config_, &jobserver_,
+#else
+  Builder builder(&state_, config_, NULL,
+#endif
+                  &build_log_, &deps_log_, &disk_interface_,
                   status, start_time_millis_);
   if (!builder.AddTarget(node, err))
     return false;
@@ -1355,7 +1367,13 @@ int NinjaMain::RunBuild(int argc, char** argv, Status* status) {
 
   disk_interface_.AllowStatCache(g_experimental_statcache);
 
-  Builder builder(&state_, config_, &build_log_, &deps_log_, &disk_interface_,
+// TODO: jobserver client support for Windows
+#ifndef _WIN32
+  Builder builder(&state_, config_, &jobserver_,
+#else
+  Builder builder(&state_, config_, NULL,
+#endif
+                  &build_log_, &deps_log_, &disk_interface_,
                   status, start_time_millis_);
   for (size_t i = 0; i < targets.size(); ++i) {
     if (!builder.AddTarget(targets[i], &err)) {

@@ -162,8 +162,26 @@ Edge* Plan::FindWork() {
   if (ready_.empty())
     return NULL;
 
+// TODO: jobserver client support for Windows
+#ifndef _WIN32
+  // Only initiate work if the jobserver can acquire a token.
+  if (builder_ && builder_->jobserver_ &&
+      builder_->jobserver_->Enabled() &&
+     !builder_->jobserver_->Acquire()) {
+    return NULL;
+  }
+#endif
+
   Edge* work = ready_.top();
   ready_.pop();
+
+// TODO: jobserver client support for Windows
+#ifndef _WIN32
+  // Mark this edge as using a job token to be released when finished.
+  if (builder_ && builder_->jobserver_)
+    work->has_job_token_ = builder_->jobserver_->Enabled();
+#endif
+
   return work;
 }
 
@@ -198,6 +216,16 @@ bool Plan::EdgeFinished(Edge* edge, EdgeResult result, string* err) {
   if (directly_wanted)
     edge->pool()->EdgeFinished(*edge);
   edge->pool()->RetrieveReadyEdges(&ready_);
+
+// TODO: jobserver client support for Windows
+#ifndef _WIN32
+  // If jobserver is used, return the token for this job.
+  if (builder_ && builder_->jobserver_ &&
+      edge->has_job_token_) {
+    builder_->jobserver_->Release();
+    edge->has_job_token_ = false;
+  }
+#endif
 
   // The rest of this function only applies to successful commands.
   if (result != kEdgeSucceeded)
@@ -592,7 +620,9 @@ void Plan::Dump() const {
 }
 
 struct RealCommandRunner : public CommandRunner {
-  explicit RealCommandRunner(const BuildConfig& config) : config_(config) {}
+  explicit RealCommandRunner(const BuildConfig& config, Jobserver* jobserver) :
+      config_(config), jobserver_(jobserver) {}
+
   size_t CanRunMore() const override;
   bool StartCommand(Edge* edge) override;
   bool WaitForCommand(Result* result) override;
@@ -600,6 +630,7 @@ struct RealCommandRunner : public CommandRunner {
   void Abort() override;
 
   const BuildConfig& config_;
+  Jobserver* jobserver_;
   SubprocessSet subprocs_;
   map<const Subprocess*, Edge*> subproc_to_edge_;
 };
@@ -614,6 +645,10 @@ vector<Edge*> RealCommandRunner::GetActiveEdges() {
 
 void RealCommandRunner::Abort() {
   subprocs_.Clear();
+// TODO: jobserver client support for Windows
+#ifndef _WIN32
+  jobserver_->Clear();
+#endif
 }
 
 size_t RealCommandRunner::CanRunMore() const {
@@ -627,6 +662,18 @@ size_t RealCommandRunner::CanRunMore() const {
     if (load_capacity < capacity)
       capacity = load_capacity;
   }
+
+// TODO: jobserver client support for Windows
+#ifndef _WIN32
+  int job_tokens = jobserver_->Tokens();
+
+  // When initialized, behave as if the implicit token is acquired already.
+  // Otherwise, this happens after a token is released but before it is replaced,
+  // so the base capacity is represented by job_tokens + 1 when positive.
+  // Add an extra loop on capacity for each job in order to get an extra token.
+  if (job_tokens)
+    capacity = abs(job_tokens) - subproc_number + 2;
+#endif
 
   if (capacity < 0)
     capacity = 0;
@@ -667,10 +714,10 @@ bool RealCommandRunner::WaitForCommand(Result* result) {
   return true;
 }
 
-Builder::Builder(State* state, const BuildConfig& config, BuildLog* build_log,
-                 DepsLog* deps_log, DiskInterface* disk_interface,
-                 Status* status, int64_t start_time_millis)
-    : state_(state), config_(config), plan_(this), status_(status),
+Builder::Builder(State* state, const BuildConfig& config, Jobserver* jobserver,
+                 BuildLog* build_log, DepsLog* deps_log, DiskInterface* disk_interface,
+                 Status* status, int64_t start_time_millis) : state_(state),
+      config_(config), jobserver_(jobserver), plan_(this), status_(status),
       start_time_millis_(start_time_millis), disk_interface_(disk_interface),
       explanations_(g_explaining ? new Explanations() : nullptr),
       scan_(state, build_log, deps_log, disk_interface,
@@ -775,7 +822,7 @@ bool Builder::Build(string* err) {
     if (config_.dry_run)
       command_runner_.reset(new DryRunCommandRunner);
     else
-      command_runner_.reset(new RealCommandRunner(config_));
+      command_runner_.reset(new RealCommandRunner(config_, jobserver_));
   }
 
   // We are about to start the build process.

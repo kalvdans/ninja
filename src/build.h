@@ -24,6 +24,7 @@
 #include "depfile_parser.h"
 #include "exit_status.h"
 #include "graph.h"
+#include "jobserver.h"
 #include "util.h"  // int64_t
 
 struct BuildLog;
@@ -187,9 +188,9 @@ struct BuildConfig {
 
 /// Builder wraps the build process: starting commands, updating status.
 struct Builder {
-  Builder(State* state, const BuildConfig& config, BuildLog* build_log,
-          DepsLog* deps_log, DiskInterface* disk_interface, Status* status,
-          int64_t start_time_millis);
+  Builder(State* state, const BuildConfig& config, Jobserver* jobserver,
+          BuildLog* build_log, DepsLog* deps_log, DiskInterface* disk_interface,
+          Status* status, int64_t start_time_millis);
   ~Builder();
 
   /// Clean up after interrupted commands by deleting output files.
@@ -224,6 +225,7 @@ struct Builder {
 
   State* state_;
   const BuildConfig& config_;
+  Jobserver* jobserver_;
   Plan plan_;
   std::unique_ptr<CommandRunner> command_runner_;
   Status* status_;
