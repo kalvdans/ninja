@@ -21,6 +21,9 @@
 #define FDS_KEY   "--jobserver-fds="
 #define FIFO_KEY  "fifo:"
 
+std::tuple<std::string, int, int>
+parse_makeflags(const char *makeflags);
+
 /// The GNU jobserver limits parallelism by assigning a token from an external
 /// pool for each command. On posix systems, the pool is a fifo or simple pipe
 /// with N characters. On windows systems, the pool is a semaphore initialized

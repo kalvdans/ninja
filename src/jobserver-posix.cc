@@ -22,13 +22,12 @@
 
 #include "util.h"
 
-Jobserver::Jobserver() {
-  assert(!Enabled());
-
-  // Return early if no makeflags are passed in the environment.
-  char* makeflags = std::getenv("MAKEFLAGS");
-  if (makeflags == nullptr || strlen(makeflags) == 0)
-    return;
+// On posix systems, <val> is 'fifo:<name>' or '<read_fd>,<write_fd>' for pipes.
+std::tuple<std::string, int, int>
+parse_makeflags(const char *makeflags)
+{
+    if (makeflags == nullptr || strlen(makeflags) == 0)
+        return {"", -1, -1};
 
   std::string::size_type flag_char_ = 0;
   std::string flag_;
@@ -62,25 +61,52 @@ Jobserver::Jobserver() {
 
   // Return early if the flag's value is empty or flag is missing.
   if (flag_.empty())
-    return;
+      return {"", -1, -1};
 
+  std::string jobserver_name_;
   jobserver_name_.assign(flag_);
   const char* jobserver = jobserver_name_.c_str();
+
+  bool jobserver_fifo_ = false;
 
   // Check for fifo type first.
   if (jobserver_name_.find(FIFO_KEY) == 0)
     jobserver_fifo_ = true;
 
+  int rfd_, wfd_;
+
   // Return early if jobserver type is unknown (neither fifo nor pipe).
   if (!jobserver_fifo_ && sscanf(jobserver, "%d,%d", &rfd_, &wfd_) != 2) {
     Warning("invalid jobserver value: '%s'", jobserver);
-    return;
+    return {"", -1, -1};
   }
 
   // Open FDs to the pipe if needed.
   if (jobserver_fifo_) {
-    rfd_ = open(jobserver + strlen(FIFO_KEY), O_RDONLY | O_NONBLOCK);
-    wfd_ = open(jobserver + strlen(FIFO_KEY), O_WRONLY);
+      return { jobserver, -1, -1 };
+  }
+
+  return { "", rfd_, wfd_ };
+}
+
+Jobserver::Jobserver() {
+  assert(!Enabled());
+
+  // Return early if no makeflags are passed in the environment.
+  char* makeflags = std::getenv("MAKEFLAGS");
+
+  std::string jobserver;
+  int rfd_;
+  int wfd_;
+  std::tie(jobserver, rfd_, wfd_) = parse_makeflags(makeflags);
+
+  if (jobserver == "" && rfd_ < 0)
+    return;
+
+  // Open FDs to the pipe if needed.
+  if (jobserver != "") {
+      rfd_ = open(jobserver.c_str() + strlen(FIFO_KEY), O_RDONLY | O_NONBLOCK);
+      wfd_ = open(jobserver.c_str() + strlen(FIFO_KEY), O_WRONLY);
   }
 
   // Exit on failure to open FDs, build non-parallel for invalid passed FDs.

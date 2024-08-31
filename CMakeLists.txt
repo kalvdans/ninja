@@ -280,6 +280,7 @@ if(BUILD_TESTING)
     src/subprocess_test.cc
     src/test.cc
     src/util_test.cc
+    src/jobserver-posix_test.cc
   )
   if(WIN32)
     target_sources(ninja_test PRIVATE src/includes_normalize_test.cc src/msvc_helper_test.cc
